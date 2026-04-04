@@ -4,7 +4,7 @@
 #include <limits>
 #include <malloc.h>
 #include <math_utils.h>
-#include <mkl.h>
+#include <cblas.h>
 #include "logger.h"
 #include "utils.h"
 
@@ -29,7 +29,7 @@ void compute_vecs_l2sq(float *vecs_l2sq, float *data, const size_t num_points, c
 #pragma omp parallel for schedule(static, 8192)
     for (int64_t n_iter = 0; n_iter < (int64_t)num_points; n_iter++)
     {
-        vecs_l2sq[n_iter] = cblas_snrm2((MKL_INT)dim, (data + (n_iter * dim)), 1);
+        vecs_l2sq[n_iter] = cblas_snrm2((int)dim, (data + (n_iter * dim)), 1);
         vecs_l2sq[n_iter] *= vecs_l2sq[n_iter];
     }
 }
@@ -45,8 +45,8 @@ void rotate_data_randomly(float *data, size_t num_points, size_t dim, float *rot
     }
     diskann::cout << "done Rotating data with random matrix.." << std::flush;
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (MKL_INT)num_points, (MKL_INT)dim, (MKL_INT)dim, 1.0, data,
-                (MKL_INT)dim, rot_mat, (MKL_INT)dim, 0, new_mat, (MKL_INT)dim);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, transpose, (int)num_points, (int)dim, (int)dim, 1.0, data,
+                (int)dim, rot_mat, (int)dim, 0, new_mat, (int)dim);
 
     diskann::cout << "done." << std::endl;
 }
@@ -84,14 +84,14 @@ void compute_closest_centers_in_block(const float *const data, const size_t num_
         ones_b[i] = 1.0;
     }
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (MKL_INT)num_points, (MKL_INT)num_centers, (MKL_INT)1, 1.0f,
-                docs_l2sq, (MKL_INT)1, ones_a, (MKL_INT)1, 0.0f, dist_matrix, (MKL_INT)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (int)num_points, (int)num_centers, (int)1, 1.0f,
+                docs_l2sq, (int)1, ones_a, (int)1, 0.0f, dist_matrix, (int)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (MKL_INT)num_points, (MKL_INT)num_centers, (MKL_INT)1, 1.0f,
-                ones_b, (MKL_INT)1, centers_l2sq, (MKL_INT)1, 1.0f, dist_matrix, (MKL_INT)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (int)num_points, (int)num_centers, (int)1, 1.0f,
+                ones_b, (int)1, centers_l2sq, (int)1, 1.0f, dist_matrix, (int)num_centers);
 
-    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (MKL_INT)num_points, (MKL_INT)num_centers, (MKL_INT)dim, -2.0f,
-                data, (MKL_INT)dim, centers, (MKL_INT)dim, 1.0f, dist_matrix, (MKL_INT)num_centers);
+    cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, (int)num_points, (int)num_centers, (int)dim, -2.0f,
+                data, (int)dim, centers, (int)dim, 1.0f, dist_matrix, (int)num_centers);
 
     if (k == 1)
     {
