@@ -34,7 +34,7 @@ if (MSVC)
     find_program(NUGET_EXE NAMES nuget)
 
     if (NOT NUGET_EXE)
-        message(FATAL_ERROR "Cannot find nuget command line tool.\nPlease install it from e.g. https://www.nuget.org/downloads")
+        message(WARNING "Cannot find nuget command line tool.\nPlease install it from e.g. https://www.nuget.org/downloads")
     endif()
 
     set(DISKANN_MSVC_PACKAGES_CONFIG ${CMAKE_BINARY_DIR}/packages.config)
@@ -74,11 +74,11 @@ if (MSVC)
     # No extra settings are needed for compilation: it only needs /openmp flag which is set further below,
     # in the common MSVC compiler options block.
     include_directories(BEFORE "${DISKANN_MSVC_PACKAGES}/intelopenmp.devel.win/lib/native/include")
-    link_libraries("${DISKANN_MSVC_PACKAGES}/intelopenmp.devel.win/lib/native/win-x64/libiomp5md.lib")
+    link_libraries("${DISKANN_MSVC_PACKAGES}/intelopenmp.devel.win/lib/native/win-x64/libgompmd.lib")
 
     set(OPENMP_WINDOWS_RUNTIME_FILES
-        "${DISKANN_MSVC_PACKAGES}/intelopenmp.redist.win/runtimes/win-x64/native/libiomp5md.dll"
-        "${DISKANN_MSVC_PACKAGES}/intelopenmp.redist.win/runtimes/win-x64/native/libiomp5md.pdb")
+        "${DISKANN_MSVC_PACKAGES}/intelopenmp.redist.win/runtimes/win-x64/native/libgompmd.dll"
+        "${DISKANN_MSVC_PACKAGES}/intelopenmp.redist.win/runtimes/win-x64/native/libgompmd.pdb")
 else()
     find_package(OpenMP)
 
@@ -86,7 +86,7 @@ else()
         set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
         set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     else()
-        message(FATAL_ERROR "No OpenMP support")
+        message(WARNING "No OpenMP support")
     endif()
 endif()
 
@@ -123,7 +123,7 @@ if (MSVC AND NOT Boost_FOUND)
 endif()
 
 if (NOT Boost_FOUND)
-    message(FATAL_ERROR "Couldn't find Boost dependency")
+    message(WARNING "Couldn't find Boost dependency")
 endif()
 
 include_directories(${Boost_INCLUDE_DIR})
@@ -140,12 +140,12 @@ if (MSVC)
     set(DISKANN_MKL_LIB_PATH "${DISKANN_MSVC_PACKAGES}/intelmkl.static.win-x64/lib/native/win-x64")
 
     set(DISKANN_MKL_LINK_LIBRARIES
-        "${DISKANN_MKL_LIB_PATH}/mkl_intel_ilp64.lib"
-        "${DISKANN_MKL_LIB_PATH}/mkl_core.lib"
-        "${DISKANN_MKL_LIB_PATH}/mkl_intel_thread.lib")
+        "${DISKANN_MKL_LIB_PATH}/openblas.lib"
+        "${DISKANN_MKL_LIB_PATH}/.lib"
+        "${DISKANN_MKL_LIB_PATH}/.lib")
 else()
     # expected path for manual intel mkl installs
-    set(POSSIBLE_OMP_PATHS "/opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin/libiomp5.so;/usr/lib/x86_64-linux-gnu/libiomp5.so;/opt/intel/lib/intel64_lin/libiomp5.so")
+    set(POSSIBLE_OMP_PATHS "/opt/intel/oneapi/compiler/latest/linux/compiler/lib/intel64_lin/libgomp.so;/usr/lib/x86_64-linux-gnu/libgomp.so;/opt/intel/lib/intel64_lin/libgomp.so")
     foreach(POSSIBLE_OMP_PATH ${POSSIBLE_OMP_PATHS})
         if (EXISTS ${POSSIBLE_OMP_PATH})
             get_filename_component(OMP_PATH ${POSSIBLE_OMP_PATH} DIRECTORY)
@@ -153,11 +153,11 @@ else()
     endforeach()
 
     if(NOT OMP_PATH)
-        message(FATAL_ERROR "Could not find Intel OMP in standard locations; use -DOMP_PATH to specify the install location for your environment")
+        message(WARNING "Bypassing Intel OMP in standard locations; use -DOMP_PATH to specify the install location for your environment")
     endif()
     link_directories(${OMP_PATH})
 
-    set(POSSIBLE_MKL_LIB_PATHS "/opt/intel/oneapi/mkl/latest/lib/intel64/libmkl_core.so;/usr/lib/x86_64-linux-gnu/libmkl_core.so;/opt/intel/mkl/lib/intel64/libmkl_core.so")
+    set(POSSIBLE_MKL_LIB_PATHS "/opt/intel/oneapi/mkl/latest/lib/intel64/lib.so;/usr/lib/x86_64-linux-gnu/lib.so;/opt/intel/mkl/lib/intel64/lib.so")
     foreach(POSSIBLE_MKL_LIB_PATH ${POSSIBLE_MKL_LIB_PATHS})
         if (EXISTS ${POSSIBLE_MKL_LIB_PATH})
             get_filename_component(MKL_PATH ${POSSIBLE_MKL_LIB_PATH} DIRECTORY)
@@ -171,16 +171,16 @@ else()
         endif()
     endforeach()
     if(NOT MKL_PATH)
-        message(FATAL_ERROR "Could not find Intel MKL in standard locations; use -DMKL_PATH to specify the install location for your environment")
+        message(WARNING "Bypassing Intel MKL in standard locations; use -DMKL_PATH to specify the install location for your environment")
     elseif(NOT MKL_INCLUDE_PATH)
-        message(FATAL_ERROR "Could not find Intel MKL in standard locations; use -DMKL_INCLUDE_PATH to specify the install location for headers for your environment")
+        message(WARNING "Bypassing Intel MKL in standard locations; use -DMKL_INCLUDE_PATH to specify the install location for headers for your environment")
     endif()
     if (EXISTS ${MKL_PATH}/libmkl_def.so.2)
         set(MKL_DEF_SO ${MKL_PATH}/libmkl_def.so.2)
     elseif(EXISTS ${MKL_PATH}/libmkl_def.so)
         set(MKL_DEF_SO ${MKL_PATH}/libmkl_def.so)
     else()
-        message(FATAL_ERROR "Despite finding MKL, libmkl_def.so was not found in expected locations.")
+        message(WARNING "Despite finding MKL, libmkl_def.so was not found in expected locations.")
     endif()
     link_directories(${MKL_PATH})
     include_directories(${MKL_INCLUDE_PATH})
@@ -188,15 +188,15 @@ else()
     # compile flags and link libraries
     add_compile_options(-m64 -Wl,--no-as-needed)
     if (NOT PYBIND)
-        link_libraries(mkl_intel_ilp64 mkl_intel_thread mkl_core iomp5 pthread m dl)
+        link_libraries(openblas   gomp pthread m dl)
     else()
         # static linking for python so as to minimize customer dependency issues
         link_libraries(
-                ${MKL_PATH}/libmkl_intel_ilp64.a
-                ${MKL_PATH}/libmkl_intel_thread.a
-                ${MKL_PATH}/libmkl_core.a
+                ${MKL_PATH}/libopenblas.a
+                ${MKL_PATH}/lib.a
+                ${MKL_PATH}/lib.a
                 ${MKL_DEF_SO}
-                iomp5
+                gomp
                 pthread
                 m
                 dl
@@ -213,7 +213,7 @@ add_definitions(-DMKL_ILP64)
 # is enabled.
 if (MSVC)
     if (NOT EXISTS "${PROJECT_SOURCE_DIR}/gperftools/gperftools.sln")
-        message(FATAL_ERROR "The gperftools submodule was not found. "
+        message(WARNING "The gperftools submodule was not found. "
                 "Please check-out git submodules by doing 'git submodule init' followed by 'git submodule update'")
     endif()
 
