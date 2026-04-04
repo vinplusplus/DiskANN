@@ -376,3 +376,12 @@ venv*/**
 
 gperftools
 
+# 数据文件
+data/
+*.tar.gz
+*.bak
+
+# 流式测试产生的结果文件
+*.after-streaming-*
+*_results_*
+*_streaming_gt*
