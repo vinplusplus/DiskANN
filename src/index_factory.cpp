@@ -1,5 +1,6 @@
 #include "index_factory.h"
 #include "pq_l2_distance.h"
+#include "nvm_graph_store.h"
 
 namespace diskann
 {
@@ -82,17 +83,19 @@ std::shared_ptr<AbstractDataStore<T>> IndexFactory::construct_datastore(DataStor
 
 std::unique_ptr<AbstractGraphStore> IndexFactory::construct_graphstore(const GraphStoreStrategy strategy,
                                                                        const size_t size,
-                                                                       const size_t reserve_graph_degree)
+                                                                       const size_t reserve_graph_degree,
+                                                                       const std::string &nvm_path)
 {
     switch (strategy)
     {
     case GraphStoreStrategy::MEMORY:
         return std::make_unique<InMemGraphStore>(size, reserve_graph_degree);
+    case GraphStoreStrategy::NVM:
+        return std::make_unique<NvmGraphStore>(size, reserve_graph_degree, nvm_path);
     default:
         throw ANNException("Error : Current GraphStoreStratagy is not supported.", -1);
     }
 }
-
 template <typename T>
 std::shared_ptr<PQDataStore<T>> IndexFactory::construct_pq_datastore(DataStoreStrategy strategy, size_t num_points,
                                                                      size_t dimension, Metric m, size_t num_pq_chunks,
@@ -138,7 +141,7 @@ std::unique_ptr<AbstractIndex> IndexFactory::create_instance()
         (size_t)(defaults::GRAPH_SLACK_FACTOR * 1.05 *
                  (_config->index_write_params == nullptr ? 0 : _config->index_write_params->max_degree));
     std::unique_ptr<AbstractGraphStore> graph_store =
-        construct_graphstore(_config->graph_strategy, num_points, max_reserve_degree);
+        construct_graphstore(_config->graph_strategy, num_points, max_reserve_degree, _config->nvm_path);
 
     // REFACTOR TODO: Must construct in-memory PQDatastore if strategy == ONDISK and must construct
     // in-mem and on-disk PQDataStore if strategy == ONDISK and diskPQ is required.

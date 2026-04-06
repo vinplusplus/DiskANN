@@ -13,9 +13,10 @@ class IndexFactory
     DISKANN_DLLEXPORT explicit IndexFactory(const IndexConfig &config);
     DISKANN_DLLEXPORT std::unique_ptr<AbstractIndex> create_instance();
 
-    DISKANN_DLLEXPORT static std::unique_ptr<AbstractGraphStore> construct_graphstore(
-        const GraphStoreStrategy stratagy, const size_t size, const size_t reserve_graph_degree);
-
+    DISKANN_DLLEXPORT static std::unique_ptr<AbstractGraphStore> construct_graphstore(const GraphStoreStrategy stratagy,
+                                                                                      const size_t size,
+                                                                                      const size_t reserve_graph_degree,
+                                                                                      const std::string &nvm_path = "");
     template <typename T>
     DISKANN_DLLEXPORT static std::shared_ptr<AbstractDataStore<T>> construct_datastore(DataStoreStrategy stratagy,
                                                                                        size_t num_points,

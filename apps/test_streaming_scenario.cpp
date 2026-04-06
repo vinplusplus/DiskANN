@@ -184,7 +184,8 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
                              const uint32_t insert_threads, const uint32_t consolidate_threads,
                              size_t max_points_to_insert, size_t active_window, size_t consolidate_interval,
                              const float start_point_norm, uint32_t num_start_pts, const std::string &save_path,
-                             const std::string &label_file, const std::string &universal_label, const uint32_t Lf)
+                             const std::string &label_file, const std::string &universal_label, const uint32_t Lf,
+                             const std::string &graph_store_strategy, const std::string &nvm_path)
 {
     const uint32_t C = 500;
     const bool saturate_graph = false;
@@ -227,25 +228,28 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
     diskann::cout << "metadata: file " << data_path << " has " << num_points << " points in " << dim << " dims"
                   << std::endl;
     aligned_dim = ROUND_UP(dim, 8);
-    auto index_config = diskann::IndexConfigBuilder()
-                            .with_metric(diskann::L2)
-                            .with_dimension(dim)
-                            .with_max_points(active_window + 4 * consolidate_interval)
-                            .is_dynamic_index(true)
-                            .is_enable_tags(true)
-                            .is_use_opq(false)
-                            .is_filtered(has_labels)
-                            .with_num_pq_chunks(0)
-                            .is_pq_dist_build(false)
-                            .with_num_frozen_pts(num_start_pts)
-                            .with_tag_type(diskann_type_to_name<TagT>())
-                            .with_label_type(diskann_type_to_name<LabelT>())
-                            .with_data_type(diskann_type_to_name<T>())
-                            .with_index_write_params(params)
-                            .with_index_search_params(index_search_params)
-                            .with_data_load_store_strategy(diskann::DataStoreStrategy::MEMORY)
-                            .with_graph_load_store_strategy(diskann::GraphStoreStrategy::MEMORY)
-                            .build();
+    auto index_config =
+        diskann::IndexConfigBuilder()
+            .with_metric(diskann::L2)
+            .with_dimension(dim)
+            .with_max_points(active_window + 4 * consolidate_interval)
+            .is_dynamic_index(true)
+            .is_enable_tags(true)
+            .is_use_opq(false)
+            .is_filtered(has_labels)
+            .with_num_pq_chunks(0)
+            .is_pq_dist_build(false)
+            .with_num_frozen_pts(num_start_pts)
+            .with_tag_type(diskann_type_to_name<TagT>())
+            .with_label_type(diskann_type_to_name<LabelT>())
+            .with_data_type(diskann_type_to_name<T>())
+            .with_index_write_params(params)
+            .with_index_search_params(index_search_params)
+            .with_data_load_store_strategy(diskann::DataStoreStrategy::MEMORY)
+            .with_graph_load_store_strategy(graph_store_strategy == "nvm" ? diskann::GraphStoreStrategy::NVM
+                                                                          : diskann::GraphStoreStrategy::MEMORY)
+            .with_nvm_path(nvm_path)
+            .build();
 
     diskann::IndexFactory index_factory = diskann::IndexFactory(index_config);
     auto index = index_factory.create_instance();
@@ -330,6 +334,7 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
 int main(int argc, char **argv)
 {
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
+    std::string graph_store_strategy, nvm_path;
     uint32_t insert_threads, consolidate_threads, R, L, num_start_pts, Lf, unique_labels_supported;
     float alpha, start_point_norm;
     size_t max_points_to_insert, active_window, consolidate_interval;
@@ -401,6 +406,11 @@ int main(int argc, char **argv)
         optional_configs.add_options()("unique_labels_supported",
                                        po::value<uint32_t>(&unique_labels_supported)->default_value(0),
                                        "Number of unique labels supported by the dynamic index.");
+        optional_configs.add_options()("graph_store_strategy",
+                                       po::value<std::string>(&graph_store_strategy)->default_value("memory"),
+                                       "Graph store backend: memory or nvm");
+        optional_configs.add_options()("nvm_path", po::value<std::string>(&nvm_path)->default_value(""),
+                                       "Path for NVM graph store file, e.g. /mnt/pmem0/graph.bin");
 
         // Merge required and optional parameters
         desc.add(required_configs).add(optional_configs);
@@ -462,14 +472,14 @@ int main(int argc, char **argv)
                 build_incremental_index<uint8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<uint8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
         }
         else if (data_type == std::string("int8"))
@@ -479,14 +489,14 @@ int main(int argc, char **argv)
                 build_incremental_index<int8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<int8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
         }
         else if (data_type == std::string("float"))
@@ -496,14 +506,14 @@ int main(int argc, char **argv)
                 build_incremental_index<float, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<float, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf);
+                    universal_label, Lf, graph_store_strategy, nvm_path);
             }
         }
     }
