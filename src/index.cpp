@@ -138,7 +138,7 @@ Index<T, TagT, LabelT>::Index(Metric m, const size_t dim, const size_t max_point
           IndexFactory::construct_datastore<T>(DataStoreStrategy::MEMORY,
                                                (max_points == 0 ? (size_t)1 : max_points) +
                                                    (dynamic_index && num_frozen_pts == 0 ? (size_t)1 : num_frozen_pts),
-                                               dim, m),
+                                               dim, m, std::string("")),
           IndexFactory::construct_graphstore(GraphStoreStrategy::MEMORY,
                                              (max_points == 0 ? (size_t)1 : max_points) +
                                                  (dynamic_index && num_frozen_pts == 0 ? (size_t)1 : num_frozen_pts),

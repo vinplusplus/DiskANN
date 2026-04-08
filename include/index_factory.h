@@ -20,15 +20,16 @@ class IndexFactory
     template <typename T>
     DISKANN_DLLEXPORT static std::shared_ptr<AbstractDataStore<T>> construct_datastore(DataStoreStrategy stratagy,
                                                                                        size_t num_points,
-                                                                                       size_t dimension, Metric m);
-    // For now PQDataStore incorporates within itself all variants of quantization that we support. In the
-    // future it may be necessary to introduce an AbstractPQDataStore class to spearate various quantization
-    // flavours.
-    template <typename T>
-    DISKANN_DLLEXPORT static std::shared_ptr<PQDataStore<T>> construct_pq_datastore(DataStoreStrategy strategy,
-                                                                                    size_t num_points, size_t dimension,
-                                                                                    Metric m, size_t num_pq_chunks,
-                                                                                    bool use_opq);
+                                                                                       size_t dimension, Metric m,
+                                                                                       const std::string &ssd_path);
+        // For now PQDataStore incorporates within itself all variants of quantization that we support. In the
+        // future it may be necessary to introduce an AbstractPQDataStore class to spearate various quantization
+        // flavours.
+        template <typename T>
+        DISKANN_DLLEXPORT
+        static std::shared_ptr<PQDataStore<T>> construct_pq_datastore(DataStoreStrategy strategy, size_t num_points,
+                                                                      size_t dimension, Metric m, size_t num_pq_chunks,
+                                                                      bool use_opq);
     template <typename T> static Distance<T> *construct_inmem_distance_fn(Metric m);
 
   private:

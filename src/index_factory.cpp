@@ -1,6 +1,7 @@
 #include "index_factory.h"
 #include "pq_l2_distance.h"
 #include "nvm_graph_store.h"
+#include "ssd_data_store.h"
 
 namespace diskann
 {
@@ -66,7 +67,7 @@ template <typename T> Distance<T> *IndexFactory::construct_inmem_distance_fn(Met
 template <typename T>
 std::shared_ptr<AbstractDataStore<T>> IndexFactory::construct_datastore(DataStoreStrategy strategy,
                                                                         size_t total_internal_points, size_t dimension,
-                                                                        Metric metric)
+                                                                        Metric metric, const std::string &ssd_path)
 {
     std::unique_ptr<Distance<T>> distance;
     switch (strategy)
@@ -75,6 +76,12 @@ std::shared_ptr<AbstractDataStore<T>> IndexFactory::construct_datastore(DataStor
         distance.reset(construct_inmem_distance_fn<T>(metric));
         return std::make_shared<diskann::InMemDataStore<T>>((location_t)total_internal_points, dimension,
                                                             std::move(distance));
+    case DataStoreStrategy::SSD:
+        if (ssd_path.empty())
+            throw ANNException("DataStoreStrategy::SSD requires ssd_path", -1);
+        distance.reset(construct_inmem_distance_fn<T>(metric));
+        return std::make_shared<diskann::SsdDataStore<T>>((location_t)total_internal_points, dimension,
+                                                          std::move(distance), ssd_path);
     default:
         break;
     }
@@ -124,7 +131,8 @@ std::unique_ptr<AbstractIndex> IndexFactory::create_instance()
     size_t num_points = _config->max_points + _config->num_frozen_pts;
     size_t dim = _config->dimension;
     // auto graph_store = construct_graphstore(_config->graph_strategy, num_points);
-    auto data_store = construct_datastore<data_type>(_config->data_strategy, num_points, dim, _config->metric);
+    auto data_store =
+        construct_datastore<data_type>(_config->data_strategy, num_points, dim, _config->metric, _config->ssd_path);
     std::shared_ptr<AbstractDataStore<data_type>> pq_data_store = nullptr;
 
     if (_config->data_strategy == DataStoreStrategy::MEMORY && _config->pq_dist_build)

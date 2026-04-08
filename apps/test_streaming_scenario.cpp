@@ -185,7 +185,8 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
                              size_t max_points_to_insert, size_t active_window, size_t consolidate_interval,
                              const float start_point_norm, uint32_t num_start_pts, const std::string &save_path,
                              const std::string &label_file, const std::string &universal_label, const uint32_t Lf,
-                             const std::string &graph_store_strategy, const std::string &nvm_path)
+                             const std::string &graph_store_strategy, const std::string &nvm_path,
+                             const std::string &data_store_strategy,const std::string &ssd_path)
 {
     const uint32_t C = 500;
     const bool saturate_graph = false;
@@ -249,6 +250,9 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
             .with_graph_load_store_strategy(graph_store_strategy == "nvm" ? diskann::GraphStoreStrategy::NVM
                                                                           : diskann::GraphStoreStrategy::MEMORY)
             .with_nvm_path(nvm_path)
+            .with_data_load_store_strategy(data_store_strategy == "ssd" ? diskann::DataStoreStrategy::SSD
+                                                                        : diskann::DataStoreStrategy::MEMORY)
+            .with_ssd_path(ssd_path)
             .build();
 
     diskann::IndexFactory index_factory = diskann::IndexFactory(index_config);
@@ -334,7 +338,7 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
 int main(int argc, char **argv)
 {
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
-    std::string graph_store_strategy, nvm_path;
+    std::string graph_store_strategy, nvm_path, data_store_strategy, ssd_path;
     uint32_t insert_threads, consolidate_threads, R, L, num_start_pts, Lf, unique_labels_supported;
     float alpha, start_point_norm;
     size_t max_points_to_insert, active_window, consolidate_interval;
@@ -411,6 +415,11 @@ int main(int argc, char **argv)
                                        "Graph store backend: memory or nvm");
         optional_configs.add_options()("nvm_path", po::value<std::string>(&nvm_path)->default_value(""),
                                        "Path for NVM graph store file, e.g. /mnt/pmem0/graph.bin");
+        optional_configs.add_options()("data_store_strategy",
+                                       po::value<std::string>(&data_store_strategy)->default_value("memory"),
+                                       "Data store backend: memory or ssd");
+        optional_configs.add_options()("ssd_path", po::value<std::string>(&ssd_path)->default_value(""),
+                                       "Path for SSD-backed vector store file, e.g. /data/index/vectors.dat");
 
         // Merge required and optional parameters
         desc.add(required_configs).add(optional_configs);
@@ -472,14 +481,14 @@ int main(int argc, char **argv)
                 build_incremental_index<uint8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<uint8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
         }
         else if (data_type == std::string("int8"))
@@ -489,14 +498,14 @@ int main(int argc, char **argv)
                 build_incremental_index<int8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<int8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
         }
         else if (data_type == std::string("float"))
@@ -506,14 +515,14 @@ int main(int argc, char **argv)
                 build_incremental_index<float, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<float, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
             }
         }
     }
