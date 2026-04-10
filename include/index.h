@@ -168,6 +168,10 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // alongside inserts and lazy deletes, else it acquires _update_lock
     DISKANN_DLLEXPORT consolidation_report consolidate_deletes(const IndexWriteParameters &parameters);
 
+    DISKANN_DLLEXPORT int delete_point_in_place(const TagT &tag, uint32_t c = 3);
+
+    DISKANN_DLLEXPORT consolidation_report consolidate_deletes_lightweight(const IndexWriteParameters &parameters) override;
+
     DISKANN_DLLEXPORT void prune_all_neighbors(const uint32_t max_degree, const uint32_t max_occlusion,
                                                const float alpha);
 
@@ -217,6 +221,8 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     virtual int _lazy_delete(const TagType &tag) override;
 
     virtual void _lazy_delete(TagVector &tags, TagVector &failed_tags) override;
+
+    virtual int _delete_point_in_place(const TagType &tag, uint32_t c) override;
 
     virtual void _get_active_tags(TagRobinSet &active_tags) override;
 
@@ -310,6 +316,8 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // Also acquires _locks[i] for i = loc and out-neighbors of loc.
     void process_delete(const tsl::robin_set<uint32_t> &old_delete_set, size_t loc, const uint32_t range,
                         const uint32_t maxc, const float alpha, InMemQueryScratch<T> *scratch);
+
+    void process_delete_lightweight(const tsl::robin_set<uint32_t> &old_delete_set, size_t loc);
 
     void initialize_query_scratch(uint32_t num_threads, uint32_t search_l, uint32_t indexing_l, uint32_t r,
                                   uint32_t maxc, size_t dim);

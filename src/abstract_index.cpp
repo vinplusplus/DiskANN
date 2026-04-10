@@ -80,6 +80,25 @@ void AbstractIndex::lazy_delete(const std::vector<tag_type> &tags, std::vector<t
     this->_lazy_delete(any_tags, any_failed_tags);
 }
 
+template <typename tag_type> int AbstractIndex::delete_point_in_place(const tag_type &tag, uint32_t c)
+{
+    auto any_tag = std::any(tag);
+    return this->_delete_point_in_place(any_tag, c);
+}
+
+int AbstractIndex::_delete_point_in_place(const TagType &tag, uint32_t c)
+{
+    throw ANNException("delete_point_in_place not implemented for this index type", -1, __FUNCSIG__, __FILE__,
+                       __LINE__);
+}
+
+consolidation_report AbstractIndex::consolidate_deletes_lightweight(const IndexWriteParameters &parameters)
+{
+    throw ANNException("consolidate_deletes_lightweight not implemented for this index type", -1, __FUNCSIG__, __FILE__,
+                       __LINE__);
+}
+
+
 template <typename tag_type> void AbstractIndex::get_active_tags(tsl::robin_set<tag_type> &active_tags)
 {
     auto any_active_tags = TagRobinSet(active_tags);
@@ -294,6 +313,11 @@ template DISKANN_DLLEXPORT int AbstractIndex::lazy_delete<int32_t>(const int32_t
 template DISKANN_DLLEXPORT int AbstractIndex::lazy_delete<uint32_t>(const uint32_t &tag);
 template DISKANN_DLLEXPORT int AbstractIndex::lazy_delete<int64_t>(const int64_t &tag);
 template DISKANN_DLLEXPORT int AbstractIndex::lazy_delete<uint64_t>(const uint64_t &tag);
+
+template DISKANN_DLLEXPORT int AbstractIndex::delete_point_in_place<int32_t>(const int32_t &tag, uint32_t c);
+template DISKANN_DLLEXPORT int AbstractIndex::delete_point_in_place<uint32_t>(const uint32_t &tag, uint32_t c);
+template DISKANN_DLLEXPORT int AbstractIndex::delete_point_in_place<int64_t>(const int64_t &tag, uint32_t c);
+template DISKANN_DLLEXPORT int AbstractIndex::delete_point_in_place<uint64_t>(const uint64_t &tag, uint32_t c);
 
 template DISKANN_DLLEXPORT void AbstractIndex::lazy_delete<int32_t>(const std::vector<int32_t> &tags,
                                                                     std::vector<int32_t> &failed_tags);

@@ -99,6 +99,11 @@ class AbstractIndex
 
     virtual consolidation_report consolidate_deletes(const IndexWriteParameters &parameters) = 0;
 
+    // In-place deletion: immediately repair in-neighbors, then lightweight consolidation cleans dangling edges.
+    template <typename tag_type> int delete_point_in_place(const tag_type &tag, uint32_t c = 3);
+
+    virtual consolidation_report consolidate_deletes_lightweight(const IndexWriteParameters &parameters);
+
     virtual void optimize_index_layout() = 0;
 
     // memory should be allocated for vec before calling this function
@@ -117,6 +122,7 @@ class AbstractIndex
     virtual int _insert_point(const DataType &data_point, const TagType tag) = 0;
     virtual int _lazy_delete(const TagType &tag) = 0;
     virtual void _lazy_delete(TagVector &tags, TagVector &failed_tags) = 0;
+    virtual int _delete_point_in_place(const TagType &tag, uint32_t c);
     virtual void _get_active_tags(TagRobinSet &active_tags) = 0;
     virtual void _set_start_points_at_random(DataType radius, uint32_t random_seed = 0) = 0;
     virtual int _get_vector_by_tag(TagType &tag, DataType &vec) = 0;

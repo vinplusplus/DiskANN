@@ -202,10 +202,10 @@ template <typename data_t> void SsdDataStore<data_t>::set_vector(const location_
     }
     // 为了和NVM上的图拓扑维持一致性，需要类似NVM的即时持久化
     // 持久化：与 NvmGraphStore 的 pmem_persist 对称
-    size_t byte_offset = offset * sizeof(data_t);
-    size_t page_start = byte_offset & ~(size_t)4095; // 4KB 对齐
-    size_t page_end = (byte_offset + _aligned_dim * sizeof(data_t) + 4095) & ~(size_t)4095;
-    msync(reinterpret_cast<char *>(_data) + page_start, page_end - page_start, MS_SYNC);
+    // size_t byte_offset = offset * sizeof(data_t);
+    // size_t page_start = byte_offset & ~(size_t)4095; // 4KB 对齐
+    // size_t page_end = (byte_offset + _aligned_dim * sizeof(data_t) + 4095) & ~(size_t)4095;
+    // msync(reinterpret_cast<char *>(_data) + page_start, page_end - page_start, MS_SYNC);
 }
 
 template <typename data_t> void SsdDataStore<data_t>::prefetch_vector(const location_t loc)

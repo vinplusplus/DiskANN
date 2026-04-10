@@ -2481,6 +2481,268 @@ consolidation_report Index<T, TagT, LabelT>::consolidate_deletes(const IndexWrit
                                 duration);
 }
 
+template <typename T, typename TagT, typename LabelT>
+int Index<T, TagT, LabelT>::_delete_point_in_place(const TagType &tag, uint32_t c)
+{
+    try
+    {
+        return this->delete_point_in_place(std::any_cast<const TagT>(tag), c);
+    }
+    catch (const std::bad_any_cast &e)
+    {
+        throw ANNException("Error: bad any cast in _delete_point_in_place() " + std::string(e.what()), -1);
+    }
+}
+
+template <typename T, typename TagT, typename LabelT>
+int Index<T, TagT, LabelT>::delete_point_in_place(const TagT &tag, uint32_t c)
+{
+    assert(_has_built);
+
+    if (tag == 0)
+    {
+        diskann::cerr << "Cannot delete tag 0 (reserved)" << std::endl;
+        return -1;
+    }
+
+    std::shared_lock<std::shared_timed_mutex> shared_ul(_update_lock);
+
+    // ---- Step 1: Resolve tag, read out-neighbors, mark deleted ----
+    uint32_t location;
+    std::vector<uint32_t> out_nbrs;
+    {
+        std::unique_lock<std::shared_timed_mutex> tl(_tag_lock);
+        std::unique_lock<std::shared_timed_mutex> dl(_delete_lock);
+
+        if (_tag_to_location.find(tag) == _tag_to_location.end())
+        {
+            diskann::cerr << "Delete tag not found " << get_tag_string(tag) << std::endl;
+            return -1;
+        }
+
+        location = _tag_to_location[tag];
+        assert(location < _max_points);
+
+        // Copy out-neighbors while holding per-node lock
+        {
+            LockGuard guard(_locks[location]);
+            out_nbrs = _graph_store->get_neighbours((location_t)location);
+        }
+
+        // Mark deleted: same bookkeeping as lazy_delete
+        _delete_set->insert(location);
+        _location_to_tag.erase(location);
+        _tag_to_location.erase(tag);
+        _data_compacted = false;
+    } // release _tag_lock, _delete_lock
+
+    // ---- Step 2: GreedySearch to find approximate in-neighbors ----
+    ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
+    auto scratch = manager.scratch_space();
+
+    const std::vector<uint32_t> init_ids = get_init_ids();
+    const std::vector<LabelT> unused_filter_label;
+
+    _data_store->get_vector((location_t)location, scratch->aligned_query());
+    uint32_t search_l = c * _indexingRange;
+    iterate_to_fixed_point(scratch, search_l, init_ids, false, unused_filter_label, false);
+
+    // Build candidate set from expanded nodes + best_l_nodes + out_nbrs
+    tsl::robin_set<uint32_t> candidate_set;
+    for (auto &nbr : scratch->pool())
+    {
+        if (nbr.id != location)
+            candidate_set.insert(nbr.id);
+    }
+    auto &best_l = scratch->best_l_nodes();
+    for (size_t i = 0; i < best_l.size(); i++)
+    {
+        if (best_l[i].id != location)
+            candidate_set.insert(best_l[i].id);
+    }
+    for (auto nb : out_nbrs)
+    {
+        if (nb != location)
+            candidate_set.insert(nb);
+    }
+
+    // ---- Step 3: Repair each candidate's adjacency list ----
+    for (auto v : candidate_set)
+    {
+        // Read adj under lock, check if repair needed
+        std::vector<uint32_t> adj;
+        bool needs_repair = false;
+        {
+            LockGuard guard(_locks[v]);
+            auto &adj_ref = _graph_store->get_neighbours((location_t)v);
+            if (std::find(adj_ref.begin(), adj_ref.end(), (uint32_t)location) != adj_ref.end())
+            {
+                adj = adj_ref; // copy
+                needs_repair = true;
+            }
+        }
+
+        if (!needs_repair)
+            continue;
+
+        // Remove deleted location
+        adj.erase(std::remove(adj.begin(), adj.end(), (uint32_t)location), adj.end());
+
+        // Splice in out-neighbors of the deleted point to maintain connectivity
+        for (auto nb : out_nbrs)
+        {
+            if (nb != v && nb != location && std::find(adj.begin(), adj.end(), nb) == adj.end())
+            {
+                adj.push_back(nb);
+            }
+        }
+
+        // If degree overflowed, prune (expensive, outside per-node lock)
+        if (adj.size() > (uint64_t)(defaults::GRAPH_SLACK_FACTOR * _indexingRange))
+        {
+            tsl::robin_set<uint32_t> dummy_visited;
+            std::vector<Neighbor> dummy_pool;
+            dummy_pool.reserve(adj.size());
+            for (auto cur_nbr : adj)
+            {
+                if (dummy_visited.find(cur_nbr) == dummy_visited.end() && cur_nbr != v)
+                {
+                    float dist = _data_store->get_distance((location_t)v, (location_t)cur_nbr);
+                    dummy_pool.emplace_back(Neighbor(cur_nbr, dist));
+                    dummy_visited.insert(cur_nbr);
+                }
+            }
+            std::vector<uint32_t> new_adj;
+            prune_neighbors(v, dummy_pool, new_adj, scratch);
+            {
+                LockGuard guard(_locks[v]);
+                _graph_store->set_neighbours((location_t)v, new_adj);
+            }
+        }
+        else
+        {
+            LockGuard guard(_locks[v]);
+            _graph_store->set_neighbours((location_t)v, adj);
+        }
+    }
+
+    // ---- Step 4: Clear deleted point's adjacency list ----
+    {
+        LockGuard guard(_locks[location]);
+        _graph_store->clear_neighbours((location_t)location);
+    }
+
+    return 0;
+}
+
+template <typename T, typename TagT, typename LabelT>
+void Index<T, TagT, LabelT>::process_delete_lightweight(const tsl::robin_set<uint32_t> &old_delete_set, size_t loc)
+{
+    std::vector<uint32_t> adj;
+    {
+        std::unique_lock<non_recursive_mutex> adj_lock;
+        if (_conc_consolidate)
+            adj_lock = std::unique_lock<non_recursive_mutex>(_locks[loc]);
+        adj = _graph_store->get_neighbours((location_t)loc);
+    }
+
+    std::vector<uint32_t> new_adj;
+    new_adj.reserve(adj.size());
+    bool changed = false;
+    for (auto ngh : adj)
+    {
+        if (old_delete_set.find(ngh) != old_delete_set.end())
+        {
+            changed = true; // skip dangling edge
+        }
+        else
+        {
+            new_adj.push_back(ngh);
+        }
+    }
+
+    if (changed)
+    {
+        std::unique_lock<non_recursive_mutex> adj_lock;
+        if (_conc_consolidate)
+            adj_lock = std::unique_lock<non_recursive_mutex>(_locks[loc]);
+        _graph_store->set_neighbours((location_t)loc, new_adj);
+    }
+}
+
+template <typename T, typename TagT, typename LabelT>
+consolidation_report Index<T, TagT, LabelT>::consolidate_deletes_lightweight(const IndexWriteParameters &params)
+{
+    if (!_enable_tags)
+        throw diskann::ANNException("Point tag array not instantiated", -1, __FUNCSIG__, __FILE__, __LINE__);
+
+    std::unique_lock<std::shared_timed_mutex> update_lock(_update_lock, std::defer_lock);
+    if (!_conc_consolidate)
+        update_lock.lock();
+
+    std::unique_lock<std::shared_timed_mutex> cl(_consolidate_lock, std::defer_lock);
+    if (!cl.try_lock())
+    {
+        diskann::cerr << "Lightweight consolidate failed to acquire consolidate lock" << std::endl;
+        return consolidation_report(diskann::consolidation_report::status_code::LOCK_FAIL, 0, 0, 0, 0, 0, 0, 0);
+    }
+
+    diskann::cout << "Starting lightweight consolidate_deletes... ";
+
+    std::unique_ptr<tsl::robin_set<uint32_t>> old_delete_set(new tsl::robin_set<uint32_t>);
+    {
+        std::unique_lock<std::shared_timed_mutex> dl(_delete_lock);
+        std::swap(_delete_set, old_delete_set);
+    }
+
+    if (old_delete_set->size() == 0)
+    {
+        diskann::cout << "Nothing to consolidate." << std::endl;
+        return consolidation_report(diskann::consolidation_report::status_code::SUCCESS, _nd, _max_points,
+                                    _empty_slots.size(), 0, 0, 0, 0.0);
+    }
+
+    const uint32_t num_threads = params.num_threads == 0 ? omp_get_num_procs() : params.num_threads;
+
+    diskann::Timer timer;
+
+    uint32_t num_calls = 0;
+#pragma omp parallel for num_threads(num_threads) schedule(dynamic, 8192) reduction(+ : num_calls)
+    for (int64_t loc = 0; loc < (int64_t)_max_points; loc++)
+    {
+        if (old_delete_set->find((uint32_t)loc) == old_delete_set->end() && !_empty_slots.is_in_set((uint32_t)loc))
+        {
+            process_delete_lightweight(*old_delete_set, loc);
+            num_calls++;
+        }
+    }
+    // Also process frozen points
+    for (int64_t loc = _max_points; loc < (int64_t)(_max_points + _num_frozen_pts); loc++)
+    {
+        process_delete_lightweight(*old_delete_set, loc);
+        num_calls++;
+    }
+
+    std::unique_lock<std::shared_timed_mutex> tl(_tag_lock);
+    size_t ret_nd = release_locations(*old_delete_set);
+    size_t max_points = _max_points;
+    size_t empty_slots_size = _empty_slots.size();
+
+    std::shared_lock<std::shared_timed_mutex> dl(_delete_lock);
+    size_t delete_set_size = _delete_set->size();
+    size_t old_delete_set_size = old_delete_set->size();
+
+    if (!_conc_consolidate)
+    {
+        update_lock.unlock();
+    }
+
+    double duration = timer.elapsed() / 1000000.0;
+    diskann::cout << " done (lightweight) in " << duration << " seconds." << std::endl;
+    return consolidation_report(diskann::consolidation_report::status_code::SUCCESS, ret_nd, max_points,
+                                empty_slots_size, old_delete_set_size, delete_set_size, num_calls, duration);
+}
+
 template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT>::compact_frozen_point()
 {
     if (_nd < _max_points && _num_frozen_pts > 0)

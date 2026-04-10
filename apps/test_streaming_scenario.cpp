@@ -180,13 +180,56 @@ void delete_and_consolidate(diskann::AbstractIndex &index, diskann::IndexWritePa
 }
 
 template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t>
+void delete_in_place_and_consolidate(diskann::AbstractIndex &index, diskann::IndexWriteParameters &delete_params,
+                                     size_t start, size_t end, uint32_t inplace_c)
+{
+    try
+    {
+        diskann::Timer delete_timer;
+        std::cout << std::endl << "In-place deleting points " << start << " to " << end << "..." << std::endl;
+
+        size_t num_failed = 0;
+#pragma omp parallel for num_threads((int32_t)delete_params.num_threads) schedule(dynamic) reduction(+ : num_failed)
+        for (int64_t i = start; i < (int64_t)end; i++)
+        {
+            int result = index.delete_point_in_place(static_cast<TagT>(1 + i), inplace_c);
+            if (result != 0)
+            {
+                num_failed++;
+            }
+        }
+
+        const double delete_elapsed = delete_timer.elapsed() / 1000000.0;
+        std::cout << "In-place deletion of " << (end - start) << " points took " << delete_elapsed << " seconds ("
+                  << (end - start) / delete_elapsed << " points/sec)" << std::endl;
+        if (num_failed > 0)
+            std::cout << num_failed << " of " << (end - start) << " in-place deletes failed" << std::endl;
+
+        diskann::Timer consol_timer;
+        auto report = index.consolidate_deletes_lightweight(delete_params);
+        std::cout << "Lightweight consolidation: " << consol_timer.elapsed() / 1000000.0 << " seconds" << std::endl;
+        std::cout << "#active   points: " << report._active_points << std::endl
+                  << "max points: " << report._max_points << std::endl
+                  << "empty slots: " << report._empty_slots << std::endl
+                  << "deletes processed: " << report._slots_released << std::endl
+                  << "latest delete size: " << report._delete_set_size << std::endl;
+    }
+    catch (std::system_error &e)
+    {
+        std::cerr << "Exiting after catching exception in in-place deletion task: " << e.what() << std::endl;
+        exit(-1);
+    }
+}
+
+template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t>
 void build_incremental_index(const std::string &data_path, const uint32_t L, const uint32_t R, const float alpha,
                              const uint32_t insert_threads, const uint32_t consolidate_threads,
                              size_t max_points_to_insert, size_t active_window, size_t consolidate_interval,
                              const float start_point_norm, uint32_t num_start_pts, const std::string &save_path,
                              const std::string &label_file, const std::string &universal_label, const uint32_t Lf,
                              const std::string &graph_store_strategy, const std::string &nvm_path,
-                             const std::string &data_store_strategy,const std::string &ssd_path)
+                             const std::string &data_store_strategy, const std::string &ssd_path,
+                             const std::string &delete_strategy, uint32_t inplace_c)
 {
     const uint32_t C = 500;
     const bool saturate_graph = false;
@@ -315,14 +358,34 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
 
         if (delete_tasks.size() > 0)
             delete_tasks[delete_tasks.size() - 1].wait();
+        // if (start >= active_window + consolidate_interval)
+        // {
+        //     auto start_del = start - active_window - consolidate_interval;
+        //     auto end_del = start - active_window;
+
+        //     delete_tasks.emplace_back(std::async(std::launch::async, [&]() {
+        //         delete_and_consolidate<T, TagT, LabelT>(*index, delete_params, (size_t)start_del, (size_t)end_del);
+        //     }));
+        // }
+
         if (start >= active_window + consolidate_interval)
         {
             auto start_del = start - active_window - consolidate_interval;
             auto end_del = start - active_window;
 
-            delete_tasks.emplace_back(std::async(std::launch::async, [&]() {
-                delete_and_consolidate<T, TagT, LabelT>(*index, delete_params, (size_t)start_del, (size_t)end_del);
-            }));
+            if (delete_strategy == "inplace")
+            {
+                delete_tasks.emplace_back(std::async(std::launch::async, [&, start_del, end_del, inplace_c]() {
+                    delete_in_place_and_consolidate<T, TagT, LabelT>(*index, delete_params, (size_t)start_del,
+                                                                     (size_t)end_del, inplace_c);
+                }));
+            }
+            else
+            {
+                delete_tasks.emplace_back(std::async(std::launch::async, [&]() {
+                    delete_and_consolidate<T, TagT, LabelT>(*index, delete_params, (size_t)start_del, (size_t)end_del);
+                }));
+            }
         }
     }
     if (delete_tasks.size() > 0)
@@ -338,7 +401,8 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
 int main(int argc, char **argv)
 {
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
-    std::string graph_store_strategy, nvm_path, data_store_strategy, ssd_path;
+    std::string graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy;
+    uint32_t inplace_c;
     uint32_t insert_threads, consolidate_threads, R, L, num_start_pts, Lf, unique_labels_supported;
     float alpha, start_point_norm;
     size_t max_points_to_insert, active_window, consolidate_interval;
@@ -420,6 +484,12 @@ int main(int argc, char **argv)
                                        "Data store backend: memory or ssd");
         optional_configs.add_options()("ssd_path", po::value<std::string>(&ssd_path)->default_value(""),
                                        "Path for SSD-backed vector store file, e.g. /data/index/vectors.dat");
+        optional_configs.add_options()("delete_strategy",
+                                       po::value<std::string>(&delete_strategy)->default_value("lazy"),
+                                       "Deletion strategy: lazy (batch consolidation) or inplace (IP-DiskANN style)");
+        optional_configs.add_options()("inplace_c",
+                                        po::value<uint32_t>(&inplace_c)->default_value(3),
+                                        "Multiplier c for in-place deletion: search L = c * R to find approximate in-neighbors");
 
         // Merge required and optional parameters
         desc.add(required_configs).add(optional_configs);
@@ -481,14 +551,16 @@ int main(int argc, char **argv)
                 build_incremental_index<uint8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<uint8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
         }
         else if (data_type == std::string("int8"))
@@ -498,14 +570,16 @@ int main(int argc, char **argv)
                 build_incremental_index<int8_t, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<int8_t, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
         }
         else if (data_type == std::string("float"))
@@ -515,14 +589,16 @@ int main(int argc, char **argv)
                 build_incremental_index<float, uint32_t, uint16_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
             else if (label_type == std::string("uint"))
             {
                 build_incremental_index<float, uint32_t, uint32_t>(
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
-                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path);
+                    universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
+                    inplace_c);
             }
         }
     }
