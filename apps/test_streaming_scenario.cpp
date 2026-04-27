@@ -229,7 +229,8 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
                              const std::string &label_file, const std::string &universal_label, const uint32_t Lf,
                              const std::string &graph_store_strategy, const std::string &nvm_path,
                              const std::string &data_store_strategy, const std::string &ssd_path,
-                             const std::string &delete_strategy, uint32_t inplace_c)
+                             const std::string &delete_strategy, uint32_t inplace_c, 
+                            const std::string &meta_path, const std::string &wal_path)
 {
     const uint32_t C = 500;
     const bool saturate_graph = false;
@@ -296,6 +297,9 @@ void build_incremental_index(const std::string &data_path, const uint32_t L, con
             .with_data_load_store_strategy(data_store_strategy == "ssd" ? diskann::DataStoreStrategy::SSD
                                                                         : diskann::DataStoreStrategy::MEMORY)
             .with_ssd_path(ssd_path)
+            .with_meta_path(meta_path)
+            .with_wal_path(wal_path)
+            .with_wal_num_entries(meta_path.empty() ? 0: static_cast<uint32_t>(active_window + 2 * consolidate_interval))
             .build();
 
     diskann::IndexFactory index_factory = diskann::IndexFactory(index_config);
@@ -402,6 +406,7 @@ int main(int argc, char **argv)
 {
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
     std::string graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy;
+    std::string meta_path, wal_path;
     uint32_t inplace_c;
     uint32_t insert_threads, consolidate_threads, R, L, num_start_pts, Lf, unique_labels_supported;
     float alpha, start_point_norm;
@@ -490,6 +495,10 @@ int main(int argc, char **argv)
         optional_configs.add_options()("inplace_c",
                                         po::value<uint32_t>(&inplace_c)->default_value(3),
                                         "Multiplier c for in-place deletion: search L = c * R to find approximate in-neighbors");
+        optional_configs.add_options()("meta_path", po::value<std::string>(&meta_path)->default_value(""),
+                                       "NVM path for slot metadata file (enables crash recovery)");
+        optional_configs.add_options()("wal_path", po::value<std::string>(&wal_path)->default_value(""),
+                                       "NVM path for vector WAL file (enables crash recovery)");
 
         // Merge required and optional parameters
         desc.add(required_configs).add(optional_configs);
@@ -552,7 +561,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
             else if (label_type == std::string("uint"))
             {
@@ -560,7 +569,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
         }
         else if (data_type == std::string("int8"))
@@ -571,7 +580,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
             else if (label_type == std::string("uint"))
             {
@@ -579,7 +588,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
         }
         else if (data_type == std::string("float"))
@@ -590,7 +599,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
             else if (label_type == std::string("uint"))
             {
@@ -598,7 +607,7 @@ int main(int argc, char **argv)
                     data_path, L, R, alpha, insert_threads, consolidate_threads, max_points_to_insert, active_window,
                     consolidate_interval, start_point_norm, num_start_pts, index_path_prefix, label_file,
                     universal_label, Lf, graph_store_strategy, nvm_path, data_store_strategy, ssd_path, delete_strategy,
-                    inplace_c);
+                    inplace_c, meta_path, wal_path);
             }
         }
     }

@@ -21,6 +21,8 @@
 #include "in_mem_data_store.h"
 #include "in_mem_graph_store.h"
 #include "abstract_index.h"
+#include "nvm_slot_meta_store.h" 
+#include "nvm_vector_wal.h"
 
 #include "quantized_distance.h"
 #include "pq_data_store.h"
@@ -29,7 +31,7 @@
 #define EXPAND_IF_FULL 0
 #define DEFAULT_MAXC 750
 
-namespace diskann
+    namespace diskann
 {
 
 inline double estimate_ram_usage(size_t size, uint32_t dim, uint32_t datasize, uint32_t degree)
@@ -433,6 +435,9 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // slots to _empty_slots.
     natural_number_set<uint32_t> _empty_slots;
     std::unique_ptr<tsl::robin_set<uint32_t>> _delete_set;
+    // ---- 持久化恢复组件 ----
+    std::unique_ptr<NvmSlotMetaStore> _slot_meta; // nullptr = 不启用
+    std::unique_ptr<NvmVectorWAL> _wal;               // nullptr = 不启用
 
     bool _data_compacted = true;    // true if data has been compacted
     bool _is_saved = false;         // Checking if the index is already saved.

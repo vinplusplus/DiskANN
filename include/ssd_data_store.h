@@ -30,6 +30,8 @@ template <typename data_t> class SsdDataStore : public AbstractDataStore<data_t>
     virtual void set_vector(const location_t i, const data_t *const vector) override;
     virtual void prefetch_vector(const location_t loc) override;
 
+    virtual void flush() override;
+
     virtual void move_vectors(const location_t old_location_start, const location_t new_location_start,
                               const location_t num_points) override;
     virtual void copy_vectors(const location_t from_loc, const location_t to_loc, const location_t num_points) override;

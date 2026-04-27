@@ -39,7 +39,10 @@ struct IndexConfig
     std::string tag_type;
     std::string data_type;
     std::string nvm_path; // only used when graph_strategy == NVM
-    std::string ssd_path; // only used when data_strategy == SSD   
+    std::string ssd_path; // only used when data_strategy == SSD
+    std::string meta_path;        // NVM slot metadata 文件，空串=不启用
+    std::string wal_path;         // NVM vector WAL 文件，空串=不启用
+    uint32_t wal_num_entries = 0; // WAL 容量（条目数），0=不启用
 
     // Params for building index
     std::shared_ptr<IndexWriteParameters> index_write_params;
@@ -52,14 +55,16 @@ struct IndexConfig
                 bool pq_dist_build, bool concurrent_consolidate, bool use_opq, bool filtered_index,
                 std::string &data_type, const std::string &tag_type, const std::string &label_type,
                 std::shared_ptr<IndexWriteParameters> index_write_params,
-                std::shared_ptr<IndexSearchParams> index_search_params, 
-                const std::string &nvm_path, const std::string &ssd_path)
+                std::shared_ptr<IndexSearchParams> index_search_params, const std::string &nvm_path,
+                const std::string &ssd_path, const std::string &meta_path, const std::string &wal_path,
+                uint32_t wal_num_entries)
         : data_strategy(data_strategy), graph_strategy(graph_strategy), metric(metric), dimension(dimension),
           max_points(max_points), dynamic_index(dynamic_index), enable_tags(enable_tags), pq_dist_build(pq_dist_build),
           concurrent_consolidate(concurrent_consolidate), use_opq(use_opq), filtered_index(filtered_index),
           num_pq_chunks(num_pq_chunks), num_frozen_pts(num_frozen_points), label_type(label_type), tag_type(tag_type),
           data_type(data_type), index_write_params(index_write_params), index_search_params(index_search_params),
-          nvm_path(nvm_path), ssd_path(ssd_path)
+          nvm_path(nvm_path), ssd_path(ssd_path), meta_path(meta_path), wal_path(wal_path),
+          wal_num_entries(wal_num_entries)
     {
     }
 
@@ -212,6 +217,21 @@ class IndexConfigBuilder
         this->_ssd_path = ssd_path;
         return *this;
     }
+    IndexConfigBuilder &with_meta_path(const std::string &meta_path)
+    {
+        this->_meta_path = meta_path;
+        return *this;
+    }
+    IndexConfigBuilder &with_wal_path(const std::string &wal_path)
+    {
+        this->_wal_path = wal_path;
+        return *this;
+    }
+    IndexConfigBuilder &with_wal_num_entries(uint32_t n)
+    {
+        this->_wal_num_entries = n;
+        return *this;
+    }
 
     IndexConfig build()
     {
@@ -239,7 +259,7 @@ class IndexConfigBuilder
         return IndexConfig(_data_strategy, _graph_strategy, _metric, _dimension, _max_points, _num_pq_chunks,
                            _num_frozen_pts, _dynamic_index, _enable_tags, _pq_dist_build, _concurrent_consolidate,
                            _use_opq, _filtered_index, _data_type, _tag_type, _label_type, _index_write_params,
-                           _index_search_params, _nvm_path, _ssd_path);
+                           _index_search_params, _nvm_path, _ssd_path, _meta_path, _wal_path, _wal_num_entries);
     }
 
     IndexConfigBuilder(const IndexConfigBuilder &) = delete;
@@ -271,5 +291,8 @@ class IndexConfigBuilder
     std::shared_ptr<IndexSearchParams> _index_search_params;
     std::string _nvm_path{""};
     std::string _ssd_path{""};
+    std::string _meta_path{""};
+    std::string _wal_path{""};
+    uint32_t _wal_num_entries{0};
 };
 } // namespace diskann

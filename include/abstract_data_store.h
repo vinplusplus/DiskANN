@@ -31,6 +31,14 @@ template <typename data_t> class AbstractDataStore
     // points, so that the store can discard the empty locations before saving.
     virtual size_t save(const std::string &filename, const location_t num_pts) = 0;
 
+    /// 将所有脏数据刷到底层存储。
+    /// InMemDataStore: no-op (DRAM无需flush)
+    /// SsdDataStore: msync(MS_SYNC)
+    virtual void flush()
+    {
+        // 默认空实现，DRAM store 不需要任何操作
+    }
+
     DISKANN_DLLEXPORT virtual location_t capacity() const;
 
     DISKANN_DLLEXPORT virtual size_t get_dims() const;
@@ -68,6 +76,7 @@ template <typename data_t> class AbstractDataStore
     virtual void get_vector(const location_t i, data_t *dest) const = 0;
     virtual void set_vector(const location_t i, const data_t *const vector) = 0;
     virtual void prefetch_vector(const location_t loc) = 0;
+
 
     // internal shuffle operations to move around vectors
     // will bulk-move all the vectors in [old_start_loc, old_start_loc +

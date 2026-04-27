@@ -5,6 +5,7 @@
 
 #include <type_traits>
 
+
 #include "boost/dynamic_bitset.hpp"
 #include "index_factory.h"
 #include "memory_mapper.h"
@@ -108,6 +109,17 @@ Index<T, TagT, LabelT>::Index(const IndexConfig &index_config, std::shared_ptr<A
             initialize_query_scratch(num_scratch_spaces, index_config.index_search_params->initial_search_list_size,
                                      _indexingQueueSize, _indexingRange, _indexingMaxC, _data_store->get_dims());
         }
+    }
+    // 初始化持久化恢复组件
+    if (!index_config.meta_path.empty())
+    {
+        _slot_meta = std::make_unique<NvmSlotMetaStore>(_max_points + _num_frozen_pts, index_config.meta_path,
+                                                        true /* create_new */);
+    }
+    if (!index_config.wal_path.empty() && index_config.wal_num_entries > 0)
+    {
+        _wal = std::make_unique<NvmVectorWAL>(index_config.wal_path, (uint32_t)_dim, (uint32_t)sizeof(T),
+                                              index_config.wal_num_entries, true /* create_new */);
     }
 }
 
@@ -1518,6 +1530,22 @@ void Index<T, TagT, LabelT>::set_start_points_at_random(T radius, uint32_t rando
     }
 
     set_start_points(points_data.data(), points_data.size());
+    // 标记 frozen points 为 LIVE
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        // >>>>>> 标记 frozen points 为 LIVE >>>>>>
+        if (_slot_meta)
+        {
+            for (size_t i = _max_points; i < _max_points + _num_frozen_pts; i++)
+            {
+                _slot_meta->set_tag_and_status(static_cast<uint32_t>(i), 0, SlotStatus::LIVE);
+            }
+        }
+        // <<<<<<
+        // >>>>>> 确保 frozen point 向量落盘（一次性开销）>>>>>>
+        _data_store->flush();
+        // <<<<<<
+    }
 }
 
 template <typename T, typename TagT, typename LabelT>
@@ -2529,6 +2557,14 @@ int Index<T, TagT, LabelT>::delete_point_in_place(const TagT &tag, uint32_t c)
             out_nbrs = _graph_store->get_neighbours((location_t)location);
         }
 
+        if constexpr (std::is_same_v<TagT, uint32_t>)
+        {
+            if (_slot_meta)
+            {
+                _slot_meta->set_status(location, SlotStatus::DELETED_PENDING);
+            }
+        }
+
         // Mark deleted: same bookkeeping as lazy_delete
         _delete_set->insert(location);
         _location_to_tag.erase(location);
@@ -2632,6 +2668,14 @@ int Index<T, TagT, LabelT>::delete_point_in_place(const TagT &tag, uint32_t c)
         _graph_store->clear_neighbours((location_t)location);
     }
 
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        if (_slot_meta)
+        {
+            _slot_meta->set_status(location, SlotStatus::DELETED_PENDING);
+        }
+    }
+
     return 0;
 }
 
@@ -2725,6 +2769,18 @@ consolidation_report Index<T, TagT, LabelT>::consolidate_deletes_lightweight(con
 
     std::unique_lock<std::shared_timed_mutex> tl(_tag_lock);
     size_t ret_nd = release_locations(*old_delete_set);
+
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        if (_slot_meta)
+        {
+            for (auto loc : *old_delete_set)
+            {
+                _slot_meta->set_status(static_cast<uint32_t>(loc), SlotStatus::EMPTY);
+            }
+        }
+    }
+
     size_t max_points = _max_points;
     size_t empty_slots_size = _empty_slots.size();
 
@@ -2735,6 +2791,18 @@ consolidation_report Index<T, TagT, LabelT>::consolidate_deletes_lightweight(con
     if (!_conc_consolidate)
     {
         update_lock.unlock();
+    }
+
+
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        // >>>>>> PLANT G: SSD flush + WAL checkpoint >>>>>>
+        if (_wal)
+        {
+            _data_store->flush(); // msync(SSD)：确保所有 page cache 中的向量落盘
+            _wal->checkpoint();   // advance WAL head：释放已保护的条目
+        }
+        // <<<<<<
     }
 
     double duration = timer.elapsed() / 1000000.0;
@@ -3224,6 +3292,15 @@ int Index<T, TagT, LabelT>::insert_point(const T *point, const TagT tag, const s
     } // cant insert as active pts >= max_pts
     dl.unlock();
 
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        if (_slot_meta)
+        {
+            _slot_meta->set_tag_and_status(static_cast<uint32_t>(location), static_cast<uint32_t>(tag),
+                                           SlotStatus::INSERTING);
+        }
+    }
+
     // Insert tag and mapping to location
     if (_enable_tags)
     {
@@ -3238,6 +3315,18 @@ int Index<T, TagT, LabelT>::insert_point(const T *point, const TagT tag, const s
         _location_to_tag.set(location, tag);
     }
     tl.unlock();
+
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        if (_wal)
+        {
+            if (!_wal->append(static_cast<uint32_t>(location), point))
+            {
+                diskann::cerr << "WARNING: WAL full at location " << location << ", vector NOT crash-protected."
+                              << std::endl;
+            }
+        }
+    }
 
     _data_store->set_vector(location, point); // update datastore
 
@@ -3280,6 +3369,26 @@ int Index<T, TagT, LabelT>::insert_point(const T *point, const TagT tag, const s
     }
 
     inter_insert(location, pruned_list, scratch);
+
+    if constexpr (std::is_same_v<TagT, uint32_t>)
+    {
+        // >>>>>> PLANT C: 事务提交 — SlotMeta LIVE >>>>>>
+        if (_slot_meta)
+        {
+            _slot_meta->set_status(static_cast<uint32_t>(location), SlotStatus::LIVE);
+        }
+        // <<<<<<
+        // >>>>>> Auto-checkpoint WAL when near full >>>>>>
+        if (_wal && _wal->needs_checkpoint())
+        {
+            // 触发条件：WAL 使用率 >= 90%
+            // 代价：一次 msync(SSD)，约 0.1-1.0s 取决于 dirty pages 数量
+            // 频率：正常参数下整个流式过程最多触发 1-2 次（初始大批量结束时）
+            _data_store->flush();
+            _wal->checkpoint();
+        }
+        // <<<<<<
+    }
 
     return 0;
 }

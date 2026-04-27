@@ -208,6 +208,18 @@ template <typename data_t> void SsdDataStore<data_t>::set_vector(const location_
     // msync(reinterpret_cast<char *>(_data) + page_start, page_end - page_start, MS_SYNC);
 }
 
+template <typename data_t> void SsdDataStore<data_t>::flush()
+{
+    size_t byte_size = static_cast<size_t>(this->_capacity) * _aligned_dim * sizeof(data_t);
+    if (_data != nullptr && byte_size > 0)
+    {
+        if (msync(_data, byte_size, MS_SYNC) != 0)
+        {
+            diskann::cerr << "SsdDataStore::flush: msync failed: " << strerror(errno) << std::endl;
+        }
+    }
+}
+
 template <typename data_t> void SsdDataStore<data_t>::prefetch_vector(const location_t loc)
 {
     diskann::prefetch_vector(reinterpret_cast<const char *>(_data) +
